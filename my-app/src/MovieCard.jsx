@@ -1,7 +1,14 @@
+import React, { useState } from "react";
 
-import React from 'react';
+const MovieCard = ({ movie: { Year, Poster, Title, Type, Runtime, Rating, TrailerUrl, Genres } }) => {
+  const [imageFailed, setImageFailed] = useState(false);
+  const genreText = Array.isArray(Genres) && Genres.length > 0 ? Genres.slice(0, 3).join(" • ") : "No genre";
+  const posterSrc = Poster && Poster !== "N/A" ? Poster : "";
 
-const MovieCard = ({ movie: { Year, Poster, Title, Type, Runtime, Rating, TrailerUrl } }) => {
+  if (!posterSrc || imageFailed) {
+    return null;
+  }
+
   return (
     <div className="movie">
       <div>
@@ -9,23 +16,31 @@ const MovieCard = ({ movie: { Year, Poster, Title, Type, Runtime, Rating, Traile
       </div>
 
       <div>
-        <img src={Poster !== "N/A" ? Poster : "https://via.placeholder.com/400"} alt={Title} />
+        <img
+          src={posterSrc}
+          alt={Title}
+          loading="lazy"
+          onError={(event) => {
+            setImageFailed(true);
+          }}
+        />
       </div>
 
       <div>
         <span>{Type}</span>
         <h3>{Title}</h3>
+        <p className="movie-meta">{genreText}</p>
         <p className="movie-meta">Runtime: {Runtime}</p>
         <p className="movie-meta">IMDb: {Rating || "N/A"}</p>
         <button
           type="button"
-          onClick={() => window.open(TrailerUrl, "_blank", "noopener,noreferrer")}
+          onClick={() => TrailerUrl && window.open(TrailerUrl, "_blank", "noopener,noreferrer")}
         >
           Watch Trailer
         </button>
       </div>
     </div>
   );
-}
+};
 
 export default MovieCard;

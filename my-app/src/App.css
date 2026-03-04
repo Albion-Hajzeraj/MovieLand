@@ -40,6 +40,79 @@ h1 {
   width: fit-content;
 }
 
+.other-version-shell {
+  width: 100%;
+}
+
+.other-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.other-title {
+  margin: 0;
+  font-size: 2.2rem;
+}
+
+.clickable-title {
+  cursor: pointer;
+}
+
+.search.search-compact {
+  width: min(420px, 46%);
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-radius: 1.5rem;
+}
+
+.search.search-compact input {
+  font-size: 1rem;
+}
+
+.search.search-compact img {
+  width: 22px;
+  height: 22px;
+}
+
+.category-bar {
+  width: 100%;
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.category-btn {
+  background: #1f2123;
+  color: #e8e8e8;
+  border: 1px solid #32363a;
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-family: var(--font-raleway);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.category-btn.active {
+  background: #f9d3b4;
+  color: #1f2123;
+  border-color: #f9d3b4;
+}
+
+.genre-select {
+  margin-left: auto;
+  background: #1f2123;
+  color: #e8e8e8;
+  border: 1px solid #32363a;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-family: var(--font-raleway);
+}
+
 .search {
   width: 71%;
   margin: 4rem 0 2rem;
@@ -98,6 +171,33 @@ h1 {
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.pagination {
+  width: 100%;
+  margin-top: 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  min-width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #1f2123;
+  color: #e8e8e8;
+  border: 1px solid #32363a;
+  font-family: var(--font-raleway);
+  cursor: pointer;
+}
+
+.page-btn.active {
+  background: #f9d3b4;
+  color: #1f2123;
+  border-color: #f9d3b4;
 }
 
 .movie {
@@ -189,9 +289,23 @@ h1 {
     padding: 4rem 2rem;
   }
 
-  .search {
-    padding: 1rem 1.75rem;
+  .other-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .search.search-compact {
     width: 100%;
+  }
+
+  .genre-select {
+    margin-left: 0;
+  }
+
+  .search {
+    padding: 1rem 1.25rem;
+    width: 100%;
+    margin-top: 1.5rem;
   }
 
   .search input {
