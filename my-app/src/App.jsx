@@ -283,21 +283,29 @@ const App = () => {
 
     return (
         <div className="app">
-            <div className="other-version-shell">
-                <div className="other-header">
+            <div className="page-glow page-glow-left" />
+            <div className="page-glow page-glow-right" />
+
+            <header className="hero">
+                <div>
                     <h1 className="other-title clickable-title" onClick={goHome}>
                         MovieLand
                     </h1>
-                    <div className="search search-compact">
-                        <input
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Search"
-                        />
-                        <img src={SearchIcon} alt="search" onClick={() => searchAllSources(searchTerm)} />
-                    </div>
+                    <p className="hero-subtitle">
+                        Discover standout films and series with fast search, smart filters, and instant trailers.
+                    </p>
                 </div>
+                <div className="search search-compact">
+                    <input
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search by title"
+                    />
+                    <img src={SearchIcon} alt="search" onClick={() => searchAllSources(searchTerm)} />
+                </div>
+            </header>
 
+            <div className="other-version-shell">
                 <div className="category-bar">
                     {CATEGORIES.map((item) => (
                         <button
@@ -320,6 +328,10 @@ const App = () => {
                             </option>
                         ))}
                     </select>
+                </div>
+
+                <div className="results-meta">
+                    {!loading && !error ? `${filteredMovies.length} results` : " "}
                 </div>
             </div>
 
