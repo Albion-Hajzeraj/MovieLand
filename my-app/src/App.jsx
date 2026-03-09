@@ -1,11 +1,14 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import MovieCard from "./MovieCard";
 import SearchIcon from "./search.svg";
 import "./App.css";
 
 const TVMAZE_API_URL = "https://api.tvmaze.com/search/shows?q=";
-const MOVIES_API_URL = `${process.env.REACT_APP_API_BASE || "http://localhost:5000/api"}/movies`;
+const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000/api";
+const MOVIES_API_URL = `${API_BASE}/movies`;
+const USERS_API_URL = `${API_BASE}/users`;
 const ITEMS_PER_PAGE = 12;
+const REQUEST_TIMEOUT_MS = 10000;
 
 const CATEGORIES = [
     { key: "all", label: "All" },
@@ -97,9 +100,12 @@ const withTrailer = (title) =>
 const mapTvMazeMovie = (item) => {
     const show = item?.show ?? {};
     const title = show?.name ?? "Untitled";
+    const tvId = show?.id ? String(show.id) : title;
     const mediaType = normalize(show?.type || "").includes("movie") ? "movie" : "show";
     return {
-        imdbID: show?.id ? `tv-${show.id}` : `tv-${title}`,
+        movieKey: `tv-${tvId}`,
+        source: "tv",
+        imdbID: `tv-${tvId}`,
         Year: show?.premiered ? String(new Date(show.premiered).getFullYear()) : "Unknown",
         Poster: show?.image?.original ?? show?.image?.medium ?? "N/A",
         Title: title,
@@ -113,6 +119,7 @@ const mapTvMazeMovie = (item) => {
 
 const mapSampleMovie = (item) => {
     const title = item?.title ?? "Untitled";
+    const dbId = item?._id ? String(item._id) : title;
     const runtimeValue =
         typeof item?.runtime === "number"
             ? `${item.runtime} min`
@@ -120,7 +127,9 @@ const mapSampleMovie = (item) => {
             ? String(item.runtime)
             : "N/A";
     return {
-        imdbID: item?._id ? `db-${item._id}` : `db-${title}`,
+        movieKey: dbId,
+        source: "db",
+        imdbID: `db-${dbId}`,
         Year: item?.year ? String(item.year) : "Unknown",
         Poster: item?.poster ?? "N/A",
         Title: title,
@@ -132,15 +141,41 @@ const mapSampleMovie = (item) => {
     };
 };
 
+const mapHistoryItem = (item) => ({
+    movieKey: item?.movieKey || `history-${item?.title || "item"}`,
+    source: item?.source || "db",
+    imdbID: `history-${item?.movieKey || item?.title || "item"}`,
+    Year: item?.year || "Unknown",
+    Poster: item?.poster || "N/A",
+    Title: item?.title || "Untitled",
+    Type: item?.source === "tv" ? "show" : "movie",
+    Runtime: "N/A",
+    Rating: "N/A",
+    TrailerUrl: withTrailer(item?.title || "movie"),
+    Genres: Array.isArray(item?.genres) ? item.genres : [],
+});
+
 const uniqueById = (items) =>
     Array.from(new Map(items.map((item) => [item.imdbID, item])).values());
 
-const fetchJson = async (url) => {
-    const response = await fetch(url);
+const fetchJson = async (url, options = {}) => {
+    const { signal, method = "GET", body } = options;
+    const response = await fetch(url, {
+        method,
+        signal,
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+
     if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
     }
-    return response.json();
+
+    const text = await response.text();
+    if (!text) return {};
+    return JSON.parse(text);
 };
 
 const toApiUrl = (query = "", genre = "", limit = 50) => {
@@ -149,6 +184,21 @@ const toApiUrl = (query = "", genre = "", limit = 50) => {
     if (query) params.set("search", query);
     if (genre && genre !== "All Genres") params.set("genre", genre);
     return `${MOVIES_API_URL}?${params.toString()}`;
+};
+
+const getOrCreateUserId = () => {
+    try {
+        const existing = localStorage.getItem("movieland_user_id");
+        if (existing) return existing;
+        const generated =
+            typeof crypto !== "undefined" && crypto.randomUUID
+                ? `user-${crypto.randomUUID().slice(0, 12)}`
+                : `user-${Math.random().toString(36).slice(2, 12)}`;
+        localStorage.setItem("movieland_user_id", generated);
+        return generated;
+    } catch {
+        return "guest-browser";
+    }
 };
 
 const App = () => {
@@ -160,6 +210,85 @@ const App = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [hasSearched, setHasSearched] = useState(false);
+    const [historyItems, setHistoryItems] = useState([]);
+    const [recommendedItems, setRecommendedItems] = useState([]);
+    const [recommendationMeta, setRecommendationMeta] = useState(null);
+    const requestSeqRef = useRef(0);
+    const userId = useMemo(() => getOrCreateUserId(), []);
+
+    const fetchUserHistory = useCallback(
+        async (signal) => {
+            const payload = await fetchJson(
+                `${USERS_API_URL}/${encodeURIComponent(userId)}/history?limit=10`,
+                { signal }
+            ).catch(() => ({ items: [] }));
+            const items = Array.isArray(payload?.items) ? payload.items.map(mapHistoryItem) : [];
+            setHistoryItems(items);
+        },
+        [userId]
+    );
+
+    const fetchRecommendations = useCallback(
+        async (signal) => {
+            const payload = await fetchJson(
+                `${USERS_API_URL}/${encodeURIComponent(userId)}/recommendations?limit=10`,
+                { signal }
+            ).catch(() => ({ items: [], favoriteGenres: [], strategy: "none" }));
+            const items = Array.isArray(payload?.items) ? payload.items.map(mapSampleMovie) : [];
+            setRecommendedItems(items);
+            setRecommendationMeta({
+                strategy: payload?.strategy || "none",
+                favoriteGenres: Array.isArray(payload?.favoriteGenres) ? payload.favoriteGenres : [],
+            });
+        },
+        [userId]
+    );
+
+    const refreshPersonalizedData = useCallback(
+        async (signal) => {
+            await Promise.all([fetchUserHistory(signal), fetchRecommendations(signal)]);
+        },
+        [fetchRecommendations, fetchUserHistory]
+    );
+
+    const trackWatch = useCallback(
+        async (movie) => {
+            if (!movie?.movieKey) return;
+            const optimisticItem = {
+                movieKey: movie.movieKey,
+                source: movie.source || "db",
+                imdbID: `history-${movie.movieKey}`,
+                Title: movie.Title,
+                Year: movie.Year,
+                Poster: movie.Poster,
+                Type: movie.Type || "movie",
+                Genres: Array.isArray(movie.Genres) ? movie.Genres : [],
+                Runtime: "N/A",
+                Rating: "N/A",
+                TrailerUrl: movie.TrailerUrl || withTrailer(movie.Title),
+            };
+
+            setHistoryItems((previous) => {
+                const deduped = previous.filter((item) => item.movieKey !== optimisticItem.movieKey);
+                return [optimisticItem, ...deduped].slice(0, 10);
+            });
+
+            await fetchJson(`${USERS_API_URL}/${encodeURIComponent(userId)}/history`, {
+                method: "POST",
+                body: {
+                    movieKey: movie.movieKey,
+                    source: movie.source || "db",
+                    title: movie.Title,
+                    year: movie.Year,
+                    poster: movie.Poster,
+                    genres: Array.isArray(movie.Genres) ? movie.Genres : [],
+                },
+            }).catch(() => {});
+
+            fetchRecommendations().catch(() => {});
+        },
+        [fetchRecommendations, userId]
+    );
 
     const filteredMovies = useMemo(() => {
         let filtered = movies.filter((movie) => hasPosterUrl(movie.Poster));
@@ -191,48 +320,56 @@ const App = () => {
         return filteredMovies.slice(start, start + ITEMS_PER_PAGE);
     }, [filteredMovies, currentPage]);
 
-    const loadDiscovery = async () => {
-        const showQueries = ["top", "popular", "marvel", "crime", "planet"];
-        const [moviePayload, showResponses] = await Promise.all([
-            fetchJson(toApiUrl("", genre, 50)).catch(() => ({ items: [] })),
-            Promise.all(
-                showQueries.map((q) =>
-                    fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(q)}`).catch(() => [])
-                )
-            ),
-        ]);
+    const loadDiscovery = useCallback(
+        async (signal) => {
+            const showQueries = ["top", "popular", "marvel", "crime", "planet"];
+            const [moviePayload, showResponses] = await Promise.all([
+                fetchJson(toApiUrl("", genre, 50), { signal }).catch(() => ({ items: [] })),
+                Promise.all(
+                    showQueries.map((q) =>
+                        fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(q)}`, { signal }).catch(() => [])
+                    )
+                ),
+            ]);
 
-        const moviesFromSample = Array.isArray(moviePayload?.items)
-            ? moviePayload.items.map(mapSampleMovie)
-            : [];
-        const showsFromTvMaze = showResponses.flatMap((payload) =>
-            Array.isArray(payload) ? payload.map(mapTvMazeMovie) : []
-        );
+            const moviesFromSample = Array.isArray(moviePayload?.items)
+                ? moviePayload.items.map(mapSampleMovie)
+                : [];
+            const showsFromTvMaze = showResponses.flatMap((payload) =>
+                Array.isArray(payload) ? payload.map(mapTvMazeMovie) : []
+            );
 
-        setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
-        setHasSearched(true);
-    };
+            setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
+            setHasSearched(true);
+        },
+        [genre]
+    );
 
-    const searchAllSources = async (title) => {
-        const query = title?.trim();
-        if (!query) {
-            await loadDiscovery();
-            return;
-        }
+    const searchAllSources = useCallback(
+        async (title, signal) => {
+            const query = title?.trim();
+            if (!query) {
+                await loadDiscovery(signal);
+                return;
+            }
 
-        const [moviesPayload, showsPayload] = await Promise.all([
-            fetchJson(toApiUrl(query, genre, 50)).catch(() => ({ items: [] })),
-            fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(query)}`).catch(() => []),
-        ]);
+            const [moviesPayload, showsPayload] = await Promise.all([
+                fetchJson(toApiUrl(query, genre, 50), { signal }).catch(() => ({ items: [] })),
+                fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(query)}`, { signal }).catch(() => []),
+            ]);
 
-        const moviesFromSample = Array.isArray(moviesPayload?.items)
-            ? moviesPayload.items.map(mapSampleMovie)
-            : [];
-        const showsFromTvMaze = Array.isArray(showsPayload) ? showsPayload.map(mapTvMazeMovie) : [];
+            const moviesFromSample = Array.isArray(moviesPayload?.items)
+                ? moviesPayload.items.map(mapSampleMovie)
+                : [];
+            const showsFromTvMaze = Array.isArray(showsPayload)
+                ? showsPayload.map(mapTvMazeMovie)
+                : [];
 
-        setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
-        setHasSearched(true);
-    };
+            setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
+            setHasSearched(true);
+        },
+        [genre, loadDiscovery]
+    );
 
     const goHome = async () => {
         setSearchTerm("");
@@ -240,16 +377,52 @@ const App = () => {
         setGenre("All Genres");
         setCurrentPage(1);
         setError("");
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         try {
             setLoading(true);
-            await loadDiscovery();
+            await loadDiscovery(controller.signal);
         } catch (err) {
             setError("Could not load home right now. Please try again.");
-            console.error(err);
+            if (err?.name !== "AbortError") {
+                console.error(err);
+            }
         } finally {
+            clearTimeout(timeoutId);
             setLoading(false);
         }
     };
+
+    const runImmediateSearch = async () => {
+        const requestId = requestSeqRef.current + 1;
+        requestSeqRef.current = requestId;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+        try {
+            setLoading(true);
+            setError("");
+            await searchAllSources(searchTerm, controller.signal);
+        } catch (err) {
+            if (err?.name !== "AbortError" && requestSeqRef.current === requestId) {
+                setMovies([]);
+                setHasSearched(true);
+                setError("Could not load movies right now. Please try again.");
+                console.error(err);
+            }
+        } finally {
+            clearTimeout(timeoutId);
+            if (requestSeqRef.current === requestId) {
+                setLoading(false);
+            }
+        }
+    };
+
+    useEffect(() => {
+        const controller = new AbortController();
+        refreshPersonalizedData(controller.signal).catch(() => {});
+        return () => controller.abort();
+    }, [refreshPersonalizedData]);
 
     useEffect(() => {
         setCurrentPage(1);
@@ -262,24 +435,39 @@ const App = () => {
     }, [currentPage, totalPages]);
 
     useEffect(() => {
-        const timeoutId = setTimeout(async () => {
+        let controller;
+        const debounceId = setTimeout(async () => {
+            const requestId = requestSeqRef.current + 1;
+            requestSeqRef.current = requestId;
+            controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
             try {
                 setLoading(true);
                 setError("");
-                await searchAllSources(searchTerm);
+                await searchAllSources(searchTerm, controller.signal);
             } catch (err) {
-                setMovies([]);
-                setHasSearched(true);
-                setError("Could not load movies right now. Please try again.");
-                console.error(err);
+                if (err?.name !== "AbortError" && requestSeqRef.current === requestId) {
+                    setMovies([]);
+                    setHasSearched(true);
+                    setError("Could not load movies right now. Please try again.");
+                    console.error(err);
+                }
             } finally {
-                setLoading(false);
+                clearTimeout(timeoutId);
+                if (requestSeqRef.current === requestId) {
+                    setLoading(false);
+                }
             }
         }, 300);
 
-        return () => clearTimeout(timeoutId);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm, genre]);
+        return () => {
+            clearTimeout(debounceId);
+            if (controller) {
+                controller.abort();
+            }
+        };
+    }, [searchTerm, genre, searchAllSources]);
 
     return (
         <div className="app">
@@ -301,9 +489,63 @@ const App = () => {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         placeholder="Search by title"
                     />
-                    <img src={SearchIcon} alt="search" onClick={() => searchAllSources(searchTerm)} />
+                    <button
+                        type="button"
+                        className="search-icon-btn"
+                        aria-label="Search movies"
+                        onClick={runImmediateSearch}
+                    >
+                        <img src={SearchIcon} alt="" aria-hidden="true" />
+                    </button>
                 </div>
             </header>
+
+            <section className="insights-grid">
+                <div className="insights-card">
+                    <h2>Recommended for You</h2>
+                    <p className="insights-subtitle">
+                        {recommendationMeta?.favoriteGenres?.length
+                            ? `Based on: ${recommendationMeta.favoriteGenres.join(", ")}`
+                            : "Start watching trailers to train recommendations."}
+                    </p>
+                    <div className="insights-items">
+                        {recommendedItems.length > 0 ? (
+                            recommendedItems.slice(0, 6).map((item) => (
+                                <button
+                                    type="button"
+                                    key={`rec-${item.imdbID}`}
+                                    className="insight-chip"
+                                    onClick={() => setSearchTerm(item.Title)}
+                                >
+                                    {item.Title}
+                                </button>
+                            ))
+                        ) : (
+                            <p className="insights-empty">No recommendations yet.</p>
+                        )}
+                    </div>
+                </div>
+                <div className="insights-card">
+                    <h2>Recent Watch History</h2>
+                    <p className="insights-subtitle">Your recent trailer activity across movies and shows.</p>
+                    <div className="insights-items">
+                        {historyItems.length > 0 ? (
+                            historyItems.slice(0, 6).map((item) => (
+                                <button
+                                    type="button"
+                                    key={`history-${item.imdbID}`}
+                                    className="insight-chip"
+                                    onClick={() => setSearchTerm(item.Title)}
+                                >
+                                    {item.Title}
+                                </button>
+                            ))
+                        ) : (
+                            <p className="insights-empty">No watch history yet.</p>
+                        )}
+                    </div>
+                </div>
+            </section>
 
             <div className="other-version-shell">
                 <div className="category-bar">
@@ -350,7 +592,13 @@ const App = () => {
             {paginatedMovies?.length > 0 ? (
                 <div className="container">
                     {paginatedMovies.map((movie) => (
-                        <MovieCard key={movie.imdbID} movie={movie} />
+                        <MovieCard
+                            key={movie.imdbID}
+                            movie={movie}
+                            userId={userId}
+                            apiBase={API_BASE}
+                            onTrackWatch={trackWatch}
+                        />
                     ))}
                 </div>
             ) : !loading && !error && hasSearched ? (
