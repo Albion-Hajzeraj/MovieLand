@@ -4,6 +4,7 @@ A full-stack movie app with:
 - React frontend (search, cards, watch trailer button)
 - Node/Express backend
 - MongoDB Atlas `sample_mflix` integration
+- Free external movie APIs for fallback data
 
 ## Stack
 - Frontend: Create React App (`my-app`)
@@ -36,6 +37,7 @@ Frontend runs at `http://localhost:3000` and backend at `http://localhost:5000`.
 Backend defaults:
 - `MONGO_DB_NAME=sample_mflix`
 - `MONGO_COLLECTION=movies`
+- `LOCAL_MOVIES_PATH` optional path to a JSON file for local fallback data
 
 ## API endpoints
 - `GET /api/health`
@@ -45,3 +47,5 @@ Backend defaults:
 ## Notes
 - "Watch Trailer" opens a YouTube trailer search for each movie title.
 - This project is portfolio-focused and does not host licensed full-length movie streams.
+- When MongoDB is unavailable or empty, the server falls back to bundled local data and
+  free public APIs (iTunes Search + JSONFakery).

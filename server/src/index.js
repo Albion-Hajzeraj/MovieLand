@@ -1,6 +1,9 @@
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { MongoClient, ObjectId } from "mongodb";
 
 const app = express();
@@ -14,6 +17,9 @@ const DEFAULT_LIMIT = 20;
 const DEFAULT_PAGE = 1;
 const MAX_SEARCH_LENGTH = 100;
 const MAX_TEXT_LENGTH = 1200;
+const LOCAL_DATA_PATH =
+  process.env.LOCAL_MOVIES_PATH ||
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "data", "local-movies.json");
 const ALLOWED_CORS_ORIGINS = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -35,6 +41,7 @@ let moviesCollection;
 let historyCollection;
 let ratingsCollection;
 let reviewsCollection;
+let localMoviesCache = null;
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -66,16 +73,22 @@ const toTrailerUrl = (title, year) => {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
 };
 
+const normalizePoster = (value) => {
+  const trimmed = normalizeString(value);
+  if (trimmed && /^https?:\/\//i.test(trimmed)) return trimmed;
+  return "https://placehold.co/600x900/111111/ffffff?text=Movie+Poster";
+};
+
 const toMovieSummary = (doc) => ({
   _id: doc._id,
   title: doc.title || "Untitled",
   year: doc.year || "Unknown",
-  poster: doc.poster || null,
+  poster: normalizePoster(doc.poster),
   genres: Array.isArray(doc.genres) ? doc.genres : [],
   plot: doc.plot || doc.fullplot || "",
   rated: doc.rated || "N/A",
   runtime: doc.runtime || "N/A",
-  imdbRating: doc.imdb?.rating ?? null,
+  imdbRating: doc.imdb?.rating ?? doc.imdbRating ?? null,
   trailerUrl: toTrailerUrl(doc.title, doc.year),
 });
 
@@ -85,7 +98,7 @@ const mapItunesMovie = (item) => {
     _id: `itunes-${item?.trackId || item?.trackName || Math.random().toString(36).slice(2, 8)}`,
     title: item?.trackName || "Untitled",
     year: Number.isFinite(releaseYear) ? releaseYear : "Unknown",
-    poster: item?.artworkUrl100?.replace("100x100bb", "600x600bb") || null,
+    poster: normalizePoster(item?.artworkUrl100?.replace("100x100bb", "600x600bb")),
     genres: item?.primaryGenreName ? [item.primaryGenreName] : [],
     plot: item?.longDescription || item?.shortDescription || "",
     rated: item?.contentAdvisoryRating || "N/A",
@@ -112,6 +125,65 @@ const fetchItunesMovies = async ({ search, limit }) => {
   const payload = await response.json();
   const items = Array.isArray(payload?.results) ? payload.results : [];
   return items.map(mapItunesMovie);
+};
+
+const mapJsonFakeryMovie = (item) => {
+  const title = item?.title || item?.original_title || "Untitled";
+  const releaseDate = item?.release_date ? new Date(item.release_date) : null;
+  const year = releaseDate && !Number.isNaN(releaseDate.getTime()) ? releaseDate.getFullYear() : "Unknown";
+  return {
+    _id: `fakery-${item?.id || item?.movie_id || title}`,
+    title,
+    year,
+    poster: normalizePoster(item?.poster_path),
+    genres: Array.isArray(item?.genres) ? item.genres : [],
+    plot: item?.overview || "",
+    rated: item?.adult ? "R" : "PG-13",
+    runtime: item?.runtime ? `${item.runtime} min` : "N/A",
+    imdbRating: item?.vote_average ?? null,
+    trailerUrl: toTrailerUrl(title, year),
+  };
+};
+
+const fetchJsonFakeryMovies = async ({ limit }) => {
+  const response = await fetch("https://jsonfakery.com/movies/paginated");
+  if (!response.ok) {
+    throw new Error(`JSONFakery API failed with status ${response.status}`);
+  }
+  const payload = await response.json();
+  const items = Array.isArray(payload?.data) ? payload.data : [];
+  return items.slice(0, limit).map(mapJsonFakeryMovie);
+};
+
+const loadLocalMovies = async () => {
+  if (localMoviesCache) return localMoviesCache;
+  try {
+    const raw = await fs.readFile(LOCAL_DATA_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    localMoviesCache = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn("Local movie data unavailable:", error.message);
+    localMoviesCache = [];
+  }
+  return localMoviesCache;
+};
+
+const matchesSearch = (title, search) =>
+  !search || normalizeString(title).toLowerCase().includes(search.toLowerCase());
+
+const filterByGenre = (movie, genre) => {
+  if (!genre) return true;
+  const genres = Array.isArray(movie.genres) ? movie.genres : [];
+  return genres.some((entry) => normalizeString(entry).toLowerCase() === genre.toLowerCase());
+};
+
+const uniqueByKey = (items, keyFn) => {
+  const map = new Map();
+  items.forEach((item) => {
+    const key = keyFn(item);
+    if (!map.has(key)) map.set(key, item);
+  });
+  return Array.from(map.values());
 };
 
 const hasPersonalizationStore = () =>
@@ -203,25 +275,37 @@ app.get("/api/movies", async (req, res) => {
       }
     }
 
-    const externalItems = await fetchItunesMovies({ search, limit });
-    const genreFiltered = genre
-      ? externalItems.filter((item) =>
-          Array.isArray(item.genres) &&
-          item.genres.some((entry) => entry.toLowerCase() === genre.toLowerCase())
-        )
-      : externalItems;
+    const localMovies = await loadLocalMovies();
+    const localFiltered = localMovies
+      .filter((movie) => matchesSearch(movie.title, search))
+      .filter((movie) => filterByGenre(movie, genre));
+
+    const [itunesItems, fakeryItems] = await Promise.all([
+      fetchItunesMovies({ search, limit }).catch(() => []),
+      fetchJsonFakeryMovies({ limit }).catch(() => []),
+    ]);
+
+    const combined = uniqueByKey(
+      [
+        ...localFiltered,
+        ...itunesItems.filter((item) => matchesSearch(item.title, search)).filter((item) => filterByGenre(item, genre)),
+        ...fakeryItems.filter((item) => matchesSearch(item.title, search)).filter((item) => filterByGenre(item, genre)),
+      ],
+      (item) => `${normalizeString(item.title).toLowerCase()}-${item.year}`
+    );
+
     const startIndex = (page - 1) * limit;
-    const pagedItems = genreFiltered.slice(startIndex, startIndex + limit);
+    const pagedItems = combined.slice(startIndex, startIndex + limit);
 
     return res.json({
-      items: pagedItems,
+      items: pagedItems.map(toMovieSummary),
       pagination: {
         page,
         limit,
-        total: genreFiltered.length,
-        totalPages: Math.max(Math.ceil(genreFiltered.length / limit), 1),
+        total: combined.length,
+        totalPages: Math.max(Math.ceil(combined.length / limit), 1),
       },
-      source: "itunes-fallback",
+      source: "hybrid-fallback",
     });
   } catch (error) {
     console.error("GET /api/movies failed:", error);
@@ -548,26 +632,33 @@ app.post("/api/community/movies/:movieKey/reviews", async (req, res) => {
 const start = async () => {
   try {
     if (mongoUri) {
-      await client.connect();
-      const db = client.db(dbName);
-      moviesCollection = db.collection(collectionName);
-      historyCollection = db.collection("app_user_history");
-      ratingsCollection = db.collection("app_movie_ratings");
-      reviewsCollection = db.collection("app_movie_reviews");
+      try {
+        await client.connect();
+        const db = client.db(dbName);
+        moviesCollection = db.collection(collectionName);
+        historyCollection = db.collection("app_user_history");
+        ratingsCollection = db.collection("app_movie_ratings");
+        reviewsCollection = db.collection("app_movie_reviews");
 
-      await Promise.all([
-        historyCollection.createIndex({ userId: 1, movieKey: 1 }, { unique: true }),
-        historyCollection.createIndex({ userId: 1, lastViewedAt: -1 }),
-        ratingsCollection.createIndex({ userId: 1, movieKey: 1 }, { unique: true }),
-        ratingsCollection.createIndex({ movieKey: 1, updatedAt: -1 }),
-        reviewsCollection.createIndex({ movieKey: 1, createdAt: -1 }),
-      ]);
-      console.log("MongoDB connected for primary movie and community data.");
+        await Promise.all([
+          historyCollection.createIndex({ userId: 1, movieKey: 1 }, { unique: true }),
+          historyCollection.createIndex({ userId: 1, lastViewedAt: -1 }),
+          ratingsCollection.createIndex({ userId: 1, movieKey: 1 }, { unique: true }),
+          ratingsCollection.createIndex({ movieKey: 1, updatedAt: -1 }),
+          reviewsCollection.createIndex({ movieKey: 1, createdAt: -1 }),
+        ]);
+        console.log("MongoDB connected for primary movie and community data.");
+      } catch (mongoError) {
+        console.warn("MongoDB connection failed. Running in fallback mode only.");
+        console.warn(mongoError?.message || mongoError);
+      }
     } else {
       console.warn(
         "MONGO_URI not set. Running in fallback mode with external movie API only."
       );
     }
+
+    await loadLocalMovies();
 
     app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);

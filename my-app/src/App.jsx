@@ -3,20 +3,17 @@ import MovieCard from "./MovieCard";
 import SearchIcon from "./search.svg";
 import "./App.css";
 
-const TVMAZE_API_URL = "https://api.tvmaze.com/search/shows?q=";
-const API_BASE = process.env.REACT_APP_API_BASE || "http://localhost:5000/api";
-const MOVIES_API_URL = `${API_BASE}/movies`;
-const USERS_API_URL = `${API_BASE}/users`;
-const ITEMS_PER_PAGE = 12;
-const REQUEST_TIMEOUT_MS = 10000;
+const API_BASE = process.env.REACT_APP_API_BASE || "/api";
+const MOVIES_API_FALLBACK = "http://localhost:5000/api";
+const MOVIES_API_URLS = [`${API_BASE}/movies`, `${MOVIES_API_FALLBACK}/movies`];
+const ITEMS_PER_PAGE = 24;
 
 const CATEGORIES = [
     { key: "all", label: "All" },
-    { key: "movies", label: "Movies" },
-    { key: "shows", label: "Shows" },
-    { key: "documentary", label: "Documentary" },
+    { key: "action", label: "Action" },
     { key: "comedy", label: "Comedy" },
-    { key: "kids", label: "Kids" },
+    { key: "drama", label: "Drama" },
+    { key: "documentary", label: "Documentary" },
 ];
 
 const GENRES = [
@@ -48,7 +45,7 @@ const normalize = (value) =>
 const hasPosterUrl = (value) => {
     if (!value || value === "N/A") return false;
     const str = String(value).trim();
-    return /^https?:\/\//i.test(str);
+    return /^https?:\/\//i.test(str) || str.startsWith("data:image/");
 };
 
 const oneEditAway = (a, b) => {
@@ -97,44 +94,18 @@ const withTrailer = (title) =>
         `${title} official trailer`
     )}`;
 
-const mapTvMazeMovie = (item) => {
-    const show = item?.show ?? {};
-    const title = show?.name ?? "Untitled";
-    const tvId = show?.id ? String(show.id) : title;
-    const mediaType = normalize(show?.type || "").includes("movie") ? "movie" : "show";
-    return {
-        movieKey: `tv-${tvId}`,
-        source: "tv",
-        imdbID: `tv-${tvId}`,
-        Year: show?.premiered ? String(new Date(show.premiered).getFullYear()) : "Unknown",
-        Poster: show?.image?.original ?? show?.image?.medium ?? "N/A",
-        Title: title,
-        Type: mediaType,
-        Runtime: show?.runtime ?? "N/A",
-        Rating: show?.rating?.average ?? "N/A",
-        TrailerUrl: withTrailer(title),
-        Genres: Array.isArray(show?.genres) ? show.genres : [],
-    };
-};
-
-const mapSampleMovie = (item) => {
+const mapApiMovie = (item) => {
     const title = item?.title ?? "Untitled";
-    const dbId = item?._id ? String(item._id) : title;
-    const runtimeValue =
-        typeof item?.runtime === "number"
-            ? `${item.runtime} min`
-            : item?.runtime && item.runtime !== "N/A"
-            ? String(item.runtime)
-            : "N/A";
+    const movieId = item?._id ? String(item._id) : title;
     return {
-        movieKey: dbId,
-        source: "db",
-        imdbID: `db-${dbId}`,
+        movieKey: movieId,
+        source: item?.source || "api",
+        imdbID: `api-${movieId}`,
         Year: item?.year ? String(item.year) : "Unknown",
         Poster: item?.poster ?? "N/A",
         Title: title,
         Type: "movie",
-        Runtime: runtimeValue,
+        Runtime: item?.runtime ?? "N/A",
         Rating: item?.imdbRating ?? "N/A",
         TrailerUrl: item?.trailerUrl || withTrailer(title),
         Genres: Array.isArray(item?.genres) ? item.genres : [],
@@ -142,17 +113,17 @@ const mapSampleMovie = (item) => {
 };
 
 const mapHistoryItem = (item) => ({
-    movieKey: item?.movieKey || `history-${item?.title || "item"}`,
-    source: item?.source || "db",
-    imdbID: `history-${item?.movieKey || item?.title || "item"}`,
-    Year: item?.year || "Unknown",
-    Poster: item?.poster || "N/A",
-    Title: item?.title || "Untitled",
-    Type: item?.source === "tv" ? "show" : "movie",
+    movieKey: item?.movieKey || `history-${item?.Title || "item"}`,
+    source: item?.source || "itunes",
+    imdbID: `history-${item?.movieKey || item?.Title || "item"}`,
+    Year: item?.Year || "Unknown",
+    Poster: item?.Poster || "N/A",
+    Title: item?.Title || "Untitled",
+    Type: "movie",
     Runtime: "N/A",
     Rating: "N/A",
-    TrailerUrl: withTrailer(item?.title || "movie"),
-    Genres: Array.isArray(item?.genres) ? item.genres : [],
+    TrailerUrl: withTrailer(item?.Title || "movie"),
+    Genres: Array.isArray(item?.Genres) ? item.Genres : [],
 });
 
 const uniqueById = (items) =>
@@ -178,27 +149,29 @@ const fetchJson = async (url, options = {}) => {
     return JSON.parse(text);
 };
 
-const toApiUrl = (query = "", genre = "", limit = 50) => {
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 8000) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetchJson(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+const fetchApiMovies = async (query = "", genre = "", limit = 50) => {
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     if (query) params.set("search", query);
-    if (genre && genre !== "All Genres") params.set("genre", genre);
-    return `${MOVIES_API_URL}?${params.toString()}`;
-};
-
-const getOrCreateUserId = () => {
-    try {
-        const existing = localStorage.getItem("movieland_user_id");
-        if (existing) return existing;
-        const generated =
-            typeof crypto !== "undefined" && crypto.randomUUID
-                ? `user-${crypto.randomUUID().slice(0, 12)}`
-                : `user-${Math.random().toString(36).slice(2, 12)}`;
-        localStorage.setItem("movieland_user_id", generated);
-        return generated;
-    } catch {
-        return "guest-browser";
+    if (genre && genre !== "All Genres" && genre !== "all") params.set("genre", genre);
+    const urls = MOVIES_API_URLS.map((base) => `${base}?${params.toString()}`);
+    for (const url of urls) {
+        const payload = await fetchWithTimeout(url).catch(() => null);
+        if (payload && Array.isArray(payload?.items)) {
+            return payload.items.map(mapApiMovie);
+        }
     }
+    return [];
 };
 
 const App = () => {
@@ -214,91 +187,24 @@ const App = () => {
     const [recommendedItems, setRecommendedItems] = useState([]);
     const [recommendationMeta, setRecommendationMeta] = useState(null);
     const requestSeqRef = useRef(0);
-    const userId = useMemo(() => getOrCreateUserId(), []);
-
-    const fetchUserHistory = useCallback(
-        async (signal) => {
-            const payload = await fetchJson(
-                `${USERS_API_URL}/${encodeURIComponent(userId)}/history?limit=10`,
-                { signal }
-            ).catch(() => ({ items: [] }));
-            const items = Array.isArray(payload?.items) ? payload.items.map(mapHistoryItem) : [];
-            setHistoryItems(items);
-        },
-        [userId]
-    );
-
-    const fetchRecommendations = useCallback(
-        async (signal) => {
-            const payload = await fetchJson(
-                `${USERS_API_URL}/${encodeURIComponent(userId)}/recommendations?limit=10`,
-                { signal }
-            ).catch(() => ({ items: [], favoriteGenres: [], strategy: "none" }));
-            const items = Array.isArray(payload?.items) ? payload.items.map(mapSampleMovie) : [];
-            setRecommendedItems(items);
-            setRecommendationMeta({
-                strategy: payload?.strategy || "none",
-                favoriteGenres: Array.isArray(payload?.favoriteGenres) ? payload.favoriteGenres : [],
-            });
-        },
-        [userId]
-    );
-
-    const refreshPersonalizedData = useCallback(
-        async (signal) => {
-            await Promise.all([fetchUserHistory(signal), fetchRecommendations(signal)]);
-        },
-        [fetchRecommendations, fetchUserHistory]
-    );
 
     const trackWatch = useCallback(
         async (movie) => {
             if (!movie?.movieKey) return;
-            const optimisticItem = {
-                movieKey: movie.movieKey,
-                source: movie.source || "db",
-                imdbID: `history-${movie.movieKey}`,
-                Title: movie.Title,
-                Year: movie.Year,
-                Poster: movie.Poster,
-                Type: movie.Type || "movie",
-                Genres: Array.isArray(movie.Genres) ? movie.Genres : [],
-                Runtime: "N/A",
-                Rating: "N/A",
-                TrailerUrl: movie.TrailerUrl || withTrailer(movie.Title),
-            };
-
+            const optimisticItem = mapHistoryItem(movie);
             setHistoryItems((previous) => {
                 const deduped = previous.filter((item) => item.movieKey !== optimisticItem.movieKey);
                 return [optimisticItem, ...deduped].slice(0, 10);
             });
-
-            await fetchJson(`${USERS_API_URL}/${encodeURIComponent(userId)}/history`, {
-                method: "POST",
-                body: {
-                    movieKey: movie.movieKey,
-                    source: movie.source || "db",
-                    title: movie.Title,
-                    year: movie.Year,
-                    poster: movie.Poster,
-                    genres: Array.isArray(movie.Genres) ? movie.Genres : [],
-                },
-            }).catch(() => {});
-
-            fetchRecommendations().catch(() => {});
         },
-        [fetchRecommendations, userId]
+        []
     );
 
     const filteredMovies = useMemo(() => {
         let filtered = movies.filter((movie) => hasPosterUrl(movie.Poster));
         const query = searchTerm.trim();
 
-        if (category === "movies") {
-            filtered = filtered.filter((movie) => movie.Type === "movie");
-        } else if (category === "shows") {
-            filtered = filtered.filter((movie) => movie.Type === "show");
-        } else if (category !== "all") {
+        if (category !== "all") {
             filtered = filtered.filter((movie) =>
                 movie.Genres.some((g) => normalize(g).includes(normalize(category)))
             );
@@ -320,52 +226,28 @@ const App = () => {
         return filteredMovies.slice(start, start + ITEMS_PER_PAGE);
     }, [filteredMovies, currentPage]);
 
-    const loadDiscovery = useCallback(
-        async (signal) => {
-            const showQueries = ["top", "popular", "marvel", "crime", "planet"];
-            const [moviePayload, showResponses] = await Promise.all([
-                fetchJson(toApiUrl("", genre, 50), { signal }).catch(() => ({ items: [] })),
-                Promise.all(
-                    showQueries.map((q) =>
-                        fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(q)}`, { signal }).catch(() => [])
-                    )
-                ),
-            ]);
-
-            const moviesFromSample = Array.isArray(moviePayload?.items)
-                ? moviePayload.items.map(mapSampleMovie)
-                : [];
-            const showsFromTvMaze = showResponses.flatMap((payload) =>
-                Array.isArray(payload) ? payload.map(mapTvMazeMovie) : []
-            );
-
-            setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
-            setHasSearched(true);
-        },
-        [genre]
-    );
+    const loadDiscovery = useCallback(async () => {
+        const apiMovies = await fetchApiMovies("", genre, 50).catch(() => []);
+        if (apiMovies.length === 0) {
+            setError("Could not load real movies right now.");
+            setMovies([]);
+        } else {
+            setMovies(uniqueById(apiMovies));
+            setError("");
+        }
+        setHasSearched(true);
+    }, [genre]);
 
     const searchAllSources = useCallback(
-        async (title, signal) => {
+        async (title) => {
             const query = title?.trim();
             if (!query) {
-                await loadDiscovery(signal);
+                await loadDiscovery();
                 return;
             }
 
-            const [moviesPayload, showsPayload] = await Promise.all([
-                fetchJson(toApiUrl(query, genre, 50), { signal }).catch(() => ({ items: [] })),
-                fetchJson(`${TVMAZE_API_URL}${encodeURIComponent(query)}`, { signal }).catch(() => []),
-            ]);
-
-            const moviesFromSample = Array.isArray(moviesPayload?.items)
-                ? moviesPayload.items.map(mapSampleMovie)
-                : [];
-            const showsFromTvMaze = Array.isArray(showsPayload)
-                ? showsPayload.map(mapTvMazeMovie)
-                : [];
-
-            setMovies(uniqueById([...moviesFromSample, ...showsFromTvMaze]));
+            const apiMatches = await fetchApiMovies(query, genre, 50).catch(() => []);
+            setMovies(uniqueById(apiMatches));
             setHasSearched(true);
         },
         [genre, loadDiscovery]
@@ -377,18 +259,15 @@ const App = () => {
         setGenre("All Genres");
         setCurrentPage(1);
         setError("");
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         try {
             setLoading(true);
-            await loadDiscovery(controller.signal);
+            await loadDiscovery();
         } catch (err) {
             setError("Could not load home right now. Please try again.");
             if (err?.name !== "AbortError") {
                 console.error(err);
             }
         } finally {
-            clearTimeout(timeoutId);
             setLoading(false);
         }
     };
@@ -396,13 +275,10 @@ const App = () => {
     const runImmediateSearch = async () => {
         const requestId = requestSeqRef.current + 1;
         requestSeqRef.current = requestId;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
         try {
             setLoading(true);
             setError("");
-            await searchAllSources(searchTerm, controller.signal);
+            await searchAllSources(searchTerm);
         } catch (err) {
             if (err?.name !== "AbortError" && requestSeqRef.current === requestId) {
                 setMovies([]);
@@ -411,7 +287,6 @@ const App = () => {
                 console.error(err);
             }
         } finally {
-            clearTimeout(timeoutId);
             if (requestSeqRef.current === requestId) {
                 setLoading(false);
             }
@@ -419,10 +294,26 @@ const App = () => {
     };
 
     useEffect(() => {
-        const controller = new AbortController();
-        refreshPersonalizedData(controller.signal).catch(() => {});
-        return () => controller.abort();
-    }, [refreshPersonalizedData]);
+        if (movies.length === 0) return;
+        const picks = movies.slice(0, 8);
+        setRecommendedItems(picks);
+        const genreCounts = new Map();
+        picks.forEach((movie) => {
+            (movie.Genres || []).forEach((entry) => {
+                const key = normalize(entry);
+                if (!key) return;
+                genreCounts.set(entry, (genreCounts.get(entry) || 0) + 1);
+            });
+        });
+        const favoriteGenres = Array.from(genreCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([name]) => name);
+        setRecommendationMeta({
+            strategy: "itunes-trending",
+            favoriteGenres,
+        });
+    }, [movies]);
 
     useEffect(() => {
         setCurrentPage(1);
@@ -435,17 +326,14 @@ const App = () => {
     }, [currentPage, totalPages]);
 
     useEffect(() => {
-        let controller;
         const debounceId = setTimeout(async () => {
             const requestId = requestSeqRef.current + 1;
             requestSeqRef.current = requestId;
-            controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
             try {
                 setLoading(true);
                 setError("");
-                await searchAllSources(searchTerm, controller.signal);
+                await searchAllSources(searchTerm);
             } catch (err) {
                 if (err?.name !== "AbortError" && requestSeqRef.current === requestId) {
                     setMovies([]);
@@ -454,7 +342,6 @@ const App = () => {
                     console.error(err);
                 }
             } finally {
-                clearTimeout(timeoutId);
                 if (requestSeqRef.current === requestId) {
                     setLoading(false);
                 }
@@ -463,11 +350,12 @@ const App = () => {
 
         return () => {
             clearTimeout(debounceId);
-            if (controller) {
-                controller.abort();
-            }
         };
     }, [searchTerm, genre, searchAllSources]);
+
+    useEffect(() => {
+        loadDiscovery().catch(() => {});
+    }, [loadDiscovery]);
 
     return (
         <div className="app">
@@ -592,13 +480,7 @@ const App = () => {
             {paginatedMovies?.length > 0 ? (
                 <div className="container">
                     {paginatedMovies.map((movie) => (
-                        <MovieCard
-                            key={movie.imdbID}
-                            movie={movie}
-                            userId={userId}
-                            apiBase={API_BASE}
-                            onTrackWatch={trackWatch}
-                        />
+                        <MovieCard key={movie.imdbID} movie={movie} onTrackWatch={trackWatch} />
                     ))}
                 </div>
             ) : !loading && !error && hasSearched ? (
@@ -629,3 +511,4 @@ const App = () => {
 };
 
 export default App;
+

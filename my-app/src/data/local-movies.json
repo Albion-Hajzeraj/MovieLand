@@ -1,0 +1,134 @@
+[
+  {
+    "_id": "local-1",
+    "title": "Solar Drift",
+    "year": 2022,
+    "poster": "https://placehold.co/600x900/0f172a/ffffff?text=Solar+Drift",
+    "genres": ["Sci-Fi", "Adventure"],
+    "plot": "A deep space navigator must guide a damaged convoy through a shifting solar storm.",
+    "rated": "PG-13",
+    "runtime": "112 min",
+    "imdbRating": 7.4
+  },
+  {
+    "_id": "local-2",
+    "title": "Last Train North",
+    "year": 2019,
+    "poster": "https://placehold.co/600x900/111827/ffffff?text=Last+Train+North",
+    "genres": ["Thriller", "Drama"],
+    "plot": "A journalist follows a cold case to a remote rail town where nothing is what it seems.",
+    "rated": "R",
+    "runtime": "104 min",
+    "imdbRating": 7.1
+  },
+  {
+    "_id": "local-3",
+    "title": "Paper Skies",
+    "year": 2020,
+    "poster": "https://placehold.co/600x900/1f2937/ffffff?text=Paper+Skies",
+    "genres": ["Romance", "Drama"],
+    "plot": "Two illustrators in rival studios discover their work is mysteriously intertwined.",
+    "rated": "PG",
+    "runtime": "97 min",
+    "imdbRating": 6.8
+  },
+  {
+    "_id": "local-4",
+    "title": "Red Signal",
+    "year": 2021,
+    "poster": "https://placehold.co/600x900/7f1d1d/ffffff?text=Red+Signal",
+    "genres": ["Action", "Crime"],
+    "plot": "A cyber detective races a rogue syndicate to stop a citywide blackout.",
+    "rated": "PG-13",
+    "runtime": "118 min",
+    "imdbRating": 7.6
+  },
+  {
+    "_id": "local-5",
+    "title": "Wild Orchard",
+    "year": 2018,
+    "poster": "https://placehold.co/600x900/065f46/ffffff?text=Wild+Orchard",
+    "genres": ["Family", "Adventure"],
+    "plot": "Siblings inherit a struggling orchard and uncover a legend hidden in the hills.",
+    "rated": "PG",
+    "runtime": "101 min",
+    "imdbRating": 6.9
+  },
+  {
+    "_id": "local-6",
+    "title": "Neon Harbor",
+    "year": 2023,
+    "poster": "https://placehold.co/600x900/0f766e/ffffff?text=Neon+Harbor",
+    "genres": ["Mystery", "Thriller"],
+    "plot": "A harbor pilot stumbles into an art smuggling ring and a deeper conspiracy.",
+    "rated": "PG-13",
+    "runtime": "110 min",
+    "imdbRating": 7.2
+  },
+  {
+    "_id": "local-7",
+    "title": "Kingdom of Dust",
+    "year": 2017,
+    "poster": "https://placehold.co/600x900/78350f/ffffff?text=Kingdom+of+Dust",
+    "genres": ["Fantasy", "Adventure"],
+    "plot": "A reluctant heir must unite rival clans before a buried kingdom resurfaces.",
+    "rated": "PG-13",
+    "runtime": "125 min",
+    "imdbRating": 7.0
+  },
+  {
+    "_id": "local-8",
+    "title": "Echoes of June",
+    "year": 2020,
+    "poster": "https://placehold.co/600x900/312e81/ffffff?text=Echoes+of+June",
+    "genres": ["Drama", "Mystery"],
+    "plot": "A composer reopens a decades-old secret after discovering a lost melody.",
+    "rated": "PG",
+    "runtime": "99 min",
+    "imdbRating": 6.7
+  },
+  {
+    "_id": "local-9",
+    "title": "Deep Blue Shift",
+    "year": 2024,
+    "poster": "https://placehold.co/600x900/0c4a6e/ffffff?text=Deep+Blue+Shift",
+    "genres": ["Sci-Fi", "Thriller"],
+    "plot": "A research crew tests an ocean reactor that bends time in dangerous ways.",
+    "rated": "PG-13",
+    "runtime": "116 min",
+    "imdbRating": 7.3
+  },
+  {
+    "_id": "local-10",
+    "title": "The Quiet Atlas",
+    "year": 2016,
+    "poster": "https://placehold.co/600x900/3f3f46/ffffff?text=The+Quiet+Atlas",
+    "genres": ["Documentary"],
+    "plot": "An expedition maps vanishing coastlines while recording stories from islanders.",
+    "rated": "G",
+    "runtime": "93 min",
+    "imdbRating": 7.8
+  },
+  {
+    "_id": "local-11",
+    "title": "Midnight Bakes",
+    "year": 2021,
+    "poster": "https://placehold.co/600x900/7c2d12/ffffff?text=Midnight+Bakes",
+    "genres": ["Comedy", "Family"],
+    "plot": "A midnight bakery becomes a secret hub for a neighborhood coming together.",
+    "rated": "PG",
+    "runtime": "95 min",
+    "imdbRating": 6.5
+  },
+  {
+    "_id": "local-12",
+    "title": "Signal to the North",
+    "year": 2022,
+    "poster": "https://placehold.co/600x900/334155/ffffff?text=Signal+to+the+North",
+    "genres": ["Adventure", "Drama"],
+    "plot": "A rescue pilot must choose between duty and family during an arctic storm.",
+    "rated": "PG-13",
+    "runtime": "108 min",
+    "imdbRating": 7.1
+  }
+]
